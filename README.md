@@ -1,2 +1,2 @@
-# code_nova_exoghosts
-Code NOVA Hackathon Repository
+# Code NOVA Hackathon Repository
+Team ExoGhosts Repository
