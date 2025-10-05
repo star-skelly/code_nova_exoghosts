@@ -5,7 +5,7 @@ NUM = 1000
 N = 90*24*2
 FS = 1/120
 ALPHA = 2.0
-VAR = 1.0
+VAR = 2.0
 SEED = 0
 OUT = "star_noise_cohort.npz"
 
