@@ -18,7 +18,7 @@ fs = 1
 
 true_period = 30*9*24
 true_dur = 30*6
-alpha = 0.002
+alpha = 0.001
 print ('true period:', true_period, 'true dur:', true_dur)
 template_true = boxtransit(cadence, period=true_period, dur=true_dur, t0=0, alpha=alpha)
 
