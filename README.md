@@ -1,4 +1,4 @@
-# EXOGHOSTS: Gap‑Aware Transit Search on TESS
+# EXOGHOSTS: Hunting for exo-ghosts in light curves
 
 Short project summary for the GitHub page.
 
