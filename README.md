@@ -1,5 +1,7 @@
 # EXOGHOSTS: Hunting for exo-ghosts in light curves
 
+![EXOGHOSTS animation](exoghost.gif)
+
 Short project summary for the GitHub page.
 
 ## What data we use
