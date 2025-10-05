@@ -1,9 +1,11 @@
 import dash
 from dash import dcc, html, Input, Output
+import dash_daq as daq
 import plotly.graph_objs as go
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import os
 from noise_generator import centered_phase_fold, detrend
 
 # ----------------------------
@@ -35,24 +37,41 @@ mpl.rcParams.update({
 })
 
 # ----------------------------
-# Load TESS heatmap and lightcurve data
+# Load TESS heatmap and lightcurve data (robust path + checks)
 # ----------------------------
-dash_data = np.load("tess_dashboard_data.npz")
+_here = os.path.dirname(__file__)
+_npz_path = os.path.join(_here, "tess_dashboard_data.npz")
+dash_data = np.load(_npz_path)
 period_grid = dash_data["period_grid"]
 dur_grid = dash_data["dur_grid"]
-scores_white = dash_data["scores_white"]
-scores_est = dash_data["scores_est"]
+scores_white = np.asarray(dash_data["scores_white"], dtype=float)
+scores_est = np.asarray(dash_data["scores_est"], dtype=float)
 cadence = dash_data["cadence"]
 lc = dash_data["lc"]
 alpha = float(dash_data["alpha"]) if "alpha" in dash_data else 0.01
 true_period = float(dash_data["true_period"]) if "true_period" in dash_data else None
 true_dur = float(dash_data["true_dur"]) if "true_dur" in dash_data else None
-
+tid = '232616284'
+phase_bins = dash_data["phase_bins"] if "phase_bins" in dash_data else None
+pf_y = dash_data["pf_y"] if "pf_y" in dash_data else None
 # Axes scaling to match matplotlib script
 period_scale_days = 30 * 24
 dur_scale_hours = 30
 period_days = period_grid / period_scale_days
 dur_hours = dur_grid / dur_scale_hours
+
+# Ensure shapes: z must be (len(dur), len(period)) for Plotly
+def _prepare_z(z):
+    z = np.asarray(z, dtype=float)
+    if not np.any(np.isfinite(z)):
+        print("[dashboard] Warning: detection score array contains no finite values.")
+    # Replace NaNs for rendering (keeps hover useful)
+    z = np.nan_to_num(z, nan=np.nanmin(z) if np.isfinite(np.nanmin(z)) else 0.0)
+    if z.shape == (len(period_grid), len(dur_grid)):
+        z = z.T
+    return z
+_z_white = _prepare_z(scores_white)
+_z_est = _prepare_z(scores_est)
 
 # Default selections: argmax in each heatmap
 imax_w = np.unravel_index(np.argmax(scores_white), scores_white.shape)
@@ -66,8 +85,17 @@ def make_phase_folded(cad, flux, period_samples, dur_samples, alpha_val, title):
     ph, mask = centered_phase_fold(cad, period_samples, dur_samples, alpha_val)
     y_dt = detrend(cad, flux, deg=2, mask=mask)
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=ph[~mask], y=y_dt[~mask], mode='markers', marker=dict(size=3, color='#4c78a8'), name='out-of-transit'))
-    fig.add_trace(go.Scatter(x=ph[mask], y=y_dt[mask], mode='markers', marker=dict(size=4, color='#e45756'), name='in-transit'))
+    # If precomputed binned series available, plot as line for speed/clarity
+    if phase_bins is not None and pf_y is not None:
+        # nearest indices for current selection
+        ip = _nearest(period_grid, period_samples)
+        idu = _nearest(dur_grid, dur_samples)
+        yb = pf_y[ip, idu]
+        if np.any(np.isfinite(yb)):
+            fig.add_trace(go.Scatter(x=phase_bins, y=yb, mode='lines', line=dict(color='#4c78a8', width=2), name='binned flux'))
+    # Scatter overlay (thin) for context
+    fig.add_trace(go.Scatter(x=ph[~mask], y=y_dt[~mask], mode='markers', marker=dict(size=2, color='rgba(76,120,168,0.35)'), name='out-of-transit'))
+    fig.add_trace(go.Scatter(x=ph[mask], y=y_dt[mask], mode='markers', marker=dict(size=3, color='rgba(228,87,86,0.65)'), name='in-transit'))
     fig.update_layout(
         title=title,
         xaxis_title='Phase (centered)',
@@ -82,6 +110,35 @@ def make_phase_folded(cad, flux, period_samples, dur_samples, alpha_val, title):
     )
     fig.update_xaxes(showline=True, linewidth=1.0, linecolor='rgba(255,255,255,0.2)', mirror=True, ticks="inside",
                      showgrid=True, gridcolor='rgba(255,255,255,0.06)', zeroline=False, range=[-0.5, 0.5])
+    fig.update_yaxes(showline=True, linewidth=1.0, linecolor='rgba(255,255,255,0.2)', mirror=True, ticks="inside",
+                     showgrid=True, gridcolor='rgba(255,255,255,0.06)', zeroline=False)
+    return fig
+
+def make_time_series(cad, flux, mask, title):
+    time_days = cad / float(30 * 24)
+    fig = go.Figure()
+    # Unfolded view as scatter
+    fig.add_trace(go.Scatter(x=time_days, y=flux, mode='markers',
+                             marker=dict(size=2, color='rgba(76,120,168,0.6)'),
+                             name='light curve'))
+    if mask is not None and np.any(mask):
+        fig.add_trace(go.Scatter(x=time_days[mask], y=flux[mask], mode='markers',
+                                 marker=dict(size=4, color='rgba(228,87,86,0.9)'),
+                                 name='in-transit'))
+    fig.update_layout(
+        title=title,
+        xaxis_title='Time [days]',
+        yaxis_title='Flux',
+        template='plotly_dark',
+        font=dict(family='Verdana', size=12, color='white'),
+        height=360,
+        margin=dict(l=60, r=30, t=60, b=60),
+        title_font=dict(size=16, color='white', family='Verdana'),
+        paper_bgcolor='#0d0d0d',
+        plot_bgcolor='#111111'
+    )
+    fig.update_xaxes(showline=True, linewidth=1.0, linecolor='rgba(255,255,255,0.2)', mirror=True, ticks="inside",
+                     showgrid=True, gridcolor='rgba(255,255,255,0.06)', zeroline=False)
     fig.update_yaxes(showline=True, linewidth=1.0, linecolor='rgba(255,255,255,0.2)', mirror=True, ticks="inside",
                      showgrid=True, gridcolor='rgba(255,255,255,0.06)', zeroline=False)
     return fig
@@ -131,7 +188,7 @@ fig_lc2 = make_phase_folded(cadence, lc, P_e0, D_e0, alpha, "Phase-folded (adapt
 
 def make_heatmap(z, title_label):
     fig = go.Figure(data=go.Heatmap(
-        z=z.T, x=period_days, y=dur_hours,
+        z=z, x=period_days, y=dur_hours,
         colorscale=[
             [0.0, "#0b0b3b"],
             [0.25, "#3a0ca3"],
@@ -142,13 +199,15 @@ def make_heatmap(z, title_label):
         showscale=False,
         hovertemplate='Period=%{x:.2f} d<br>Duration=%{y:.2f} h<br>Detection score=%{z:.3f}<extra></extra>'
     ))
+    # Title mapping without super-title
+    tl = str(title_label).lower()
     fig.update_layout(
         xaxis_title='Period [days]',
         yaxis_title='Duration [hours]',
         template='plotly_dark',
         font=dict(family='Verdana', size=12, color='white'),
-        margin=dict(l=60, r=40, t=10, b=60),
-        height=520,
+        margin=dict(l=60, r=40, t=10, b=40),
+        height=420,
         paper_bgcolor='#0d0d0d',
         plot_bgcolor='#111111',
     )
@@ -165,8 +224,8 @@ def make_heatmap(z, title_label):
         fig.add_trace(go.Scatter(x=[x0], y=[y0], mode='markers', marker=dict(symbol='x', size=10, color='red'), showlegend=False))
     return fig
 
-heatmap_white = make_heatmap(scores_white, "baseline white-noise")
-heatmap_est = make_heatmap(scores_est, "adaptive learned stellar model")
+heatmap_white = make_heatmap(_z_white, "Baseline: white-noise detector score")
+heatmap_est = make_heatmap(_z_est, "Adaptive stellar model detector score")
 
 # ----------------------------
 # Dash app layout
@@ -190,7 +249,7 @@ app.layout = html.Div([
             "marginTop": "6px", "marginBottom": "6px",
             "color": "#d8dffb", "fontFamily": "Verdana, sans-serif"
         }),
-        html.P("Fill this area with target name, exposure, pipeline notes, etc.", style={
+        html.P(id="obs-text", style={
             "color": "#bdbdbd", "fontFamily": "Verdana, sans-serif"
         })
     ], style={
@@ -213,34 +272,52 @@ app.layout = html.Div([
     html.Div([
         html.Div([
             html.H3("baseline white-noise", style={"textAlign": "center", "color": "#d8dffb", "fontFamily": "Verdana, sans-serif"}),
-            dcc.Graph(id='heatmap_white', figure=heatmap_white, config={"responsive": True})
+            dcc.Graph(id='heatmap_white', figure=heatmap_white, config={"responsive": True}, style={"height": "420px"})
         ], style={"width": "48%"}),
         html.Div([
             html.H3("adaptive learned stellar model", style={"textAlign": "center", "color": "#d8dffb", "fontFamily": "Verdana, sans-serif"}),
-            dcc.Graph(id='heatmap_est', figure=heatmap_est, config={"responsive": True})
+            dcc.Graph(id='heatmap_est', figure=heatmap_est, config={"responsive": True}, style={"height": "420px"})
         ], style={"width": "48%"}),
-    ], style={"display": "flex", "justifyContent": "space-between", "width": "90%", "margin": "12px auto"}),
+    ], style={"display": "flex", "justifyContent": "space-between", "width": "90%", "margin": "12px auto 20px auto", "position": "relative"}),
 
-    # clicked-data text area
-    html.Div(id="click-data", style={
+    # clicked-data + note
+    html.Div([
+        html.Div(id="click-data"),
+        html.Div(html.I("Note: red cross marks the true simulated transit parameters."), style={"marginTop": "6px"})
+    ], style={
         "textAlign": "center", "marginTop": "16px", "color": "#d1d1d1", "fontFamily": "Verdana, sans-serif"
+    }),
+
+    # view mode toggle (compact pro switch)
+    html.Div([
+        html.Span("View:", style={"marginRight": "10px", "fontWeight": "600", "color": "#d1d1d1"}),
+        html.Span("Phase-folded", style={"marginRight": "10px", "color": "#d1d1d1"}),
+        daq.BooleanSwitch(id='view-toggle', on=False, color="#4c78a8"),
+        html.Span("Unfolded", style={"marginLeft": "10px", "color": "#d1d1d1"}),
+    ], style={
+        "textAlign": "center", "marginTop": "10px", "padding": "8px 12px",
+        "borderRadius": "10px", "backgroundColor": "#121219", "display": "inline-block"
     }),
 
     # two lightcurves side-by-side
     html.Div([
         html.Div(dcc.Graph(id='lightcurve1', figure=fig_lc1), style={"width": "48%"}),
         html.Div(dcc.Graph(id='lightcurve2', figure=fig_lc2), style={"width": "48%"}),
-    ], style={"display": "flex", "justifyContent": "space-between", "width": "90%", "margin": "18px auto"})
+    ], style={"display": "flex", "justifyContent": "space-between", "width": "90%", "margin": "24px auto", "position": "relative"})
 ], style={"backgroundColor": "#0d0d0d", "paddingBottom": "40px"})
 
 @app.callback(
     [Output('lightcurve1', 'figure'),
      Output('lightcurve2', 'figure'),
-     Output('click-data', 'children')],
+     Output('click-data', 'children'),
+     Output('obs-text', 'children'),
+     Output('heatmap_white', 'figure'),
+     Output('heatmap_est', 'figure')],
     [Input('heatmap_white', 'clickData'),
-     Input('heatmap_est', 'clickData')]
+     Input('heatmap_est', 'clickData'),
+     Input('view-toggle', 'on')]
 )
-def update_lightcurves(cd_white, cd_est):
+def update_lightcurves(cd_white, cd_est, view_toggle_on):
     # White selection
     if cd_white and 'points' in cd_white and cd_white['points']:
         x_days = float(cd_white['points'][0]['x'])
@@ -263,16 +340,50 @@ def update_lightcurves(cd_white, cd_est):
     P_e = float(period_grid[ie])
     D_e = float(dur_grid[je])
 
-    fig1 = make_phase_folded(cadence, lc, P_w, D_w, alpha, "Phase-folded (baseline white-noise)")
-    fig2 = make_phase_folded(cadence, lc, P_e, D_e, alpha, "Phase-folded (adaptive learned stellar model)")
+    if bool(view_toggle_on):
+        # compute masks for highlighting
+        _, m_w = centered_phase_fold(cadence, P_w, D_w, alpha)
+        _, m_e = centered_phase_fold(cadence, P_e, D_e, alpha)
+        fig1 = make_time_series(cadence, lc, m_w, "Unfolded (baseline white-noise)")
+        fig2 = make_time_series(cadence, lc, m_e, "Unfolded (adaptive learned stellar model)")
+    else:
+        fig1 = make_phase_folded(cadence, lc, P_w, D_w, alpha, "Phase-folded (baseline white-noise)")
+        fig2 = make_phase_folded(cadence, lc, P_e, D_e, alpha, "Phase-folded (adaptive learned stellar model)")
 
     click_text = html.I(
         f"White: period={period_days[iw]:.2f} d, dur={dur_hours[jw]:.2f} h | "
         f"Adaptive: period={period_days[ie]:.2f} d, dur={dur_hours[je]:.2f} h",
         style={"color": "#d1d1d1", "fontFamily": "Verdana, sans-serif"}
     )
+    # Observation details
+    obs_lines = [
+        f"TID: {tid}" if tid is not None else "TID: N/A",
+        f"True period: {true_period/period_scale_days:.2f} d" if true_period is not None else "True period: N/A",
+        f"True duration: {true_dur/dur_scale_hours:.2f} h" if true_dur is not None else "True duration: N/A",
+        f"Cadence: 2 minutes; total baseline ≈ 90 days (3 sectors)"
+    ]
+    # Render without bullets: line-separated spans
+    obs_elems = []
+    for s in obs_lines:
+        obs_elems.append(html.Span(s))
+        obs_elems.append(html.Br())
+    obs_text = html.Div(obs_elems)
 
-    return fig1, fig2, click_text
+    # Highlight selected cell on each heatmap
+    def _add_cross(fig, i, j):
+        x = period_days[i]
+        y = dur_hours[j]
+        fig.add_shape(type='rect', x0=x-(period_days[1]-period_days[0])/2, x1=x+(period_days[1]-period_days[0])/2,
+                      y0=y-(dur_hours[1]-dur_hours[0])/2, y1=y+(dur_hours[1]-dur_hours[0])/2,
+                      line=dict(color='#00e5ff', width=2))
+        return fig
+
+    hw = make_heatmap(_z_white, "baseline white-noise")
+    he = make_heatmap(_z_est, "adaptive learned stellar model")
+    hw = _add_cross(hw, iw, jw)
+    he = _add_cross(he, ie, je)
+
+    return fig1, fig2, click_text, obs_text, hw, he
 
 # ----------------------------
 # Run app

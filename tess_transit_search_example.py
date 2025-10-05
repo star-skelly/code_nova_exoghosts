@@ -80,6 +80,21 @@ print("white est :(period,dur)=", (est_period_w, est_dur_w), " max=", scores_whi
 print("est-PSD est:(period,dur)=", (est_period_e, est_dur_e), " max=", scores_est[imax_e])
 
 # Save dashboard data (heatmaps and light curve) for Plotly Dash
+NBINS = 200
+edges = np.linspace(-0.5, 0.5, NBINS + 1)
+phase_bins = 0.5 * (edges[:-1] + edges[1:])
+pf_y = np.full((len(period_grid), len(dur_grid), NBINS), np.nan, dtype=float)
+for i, P in enumerate(period_grid):
+    for j, D in enumerate(dur_grid):
+        ph, m = centered_phase_fold(cadence, P, D, alpha)
+        y_dt = detrend(cadence, lc, deg=2, mask=m)
+        idxb = np.digitize(ph, edges) - 1
+        for b in range(NBINS):
+            sel = idxb == b
+            if np.any(sel):
+                pf_y[i, j, b] = np.nanmedian(y_dt[sel])
+
+"""
 np.savez_compressed(
     "tess_dashboard_data.npz",
     period_grid=period_grid,
@@ -91,7 +106,10 @@ np.savez_compressed(
     alpha=alpha,
     true_period=true_period,
     true_dur=true_dur,
+    phase_bins=phase_bins,
+    pf_y=pf_y,
 )
+"""
 
 # Heatmaps (axes as period [days], duration [hours])
 fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
@@ -103,7 +121,7 @@ extent_scaled = [period_grid[0] / period_scale_days,
                  dur_grid[-1] / dur_scale_hours]
 
 im0 = axes[0].imshow(scores_white.T, origin='lower', cmap='Blues', aspect='auto', extent=extent_scaled)
-axes[0].set_title('White PSD')
+axes[0].set_title('Baseline:White PSD')
 axes[0].set_xlabel('Period [days]')
 axes[0].set_ylabel('Duration [hours]')
 axes[0].plot(true_period / period_scale_days, true_dur / dur_scale_hours, 'rx', ms=6)
