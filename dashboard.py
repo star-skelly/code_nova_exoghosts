@@ -290,10 +290,13 @@ app.layout = html.Div([
 
     # view mode toggle (compact pro switch)
     html.Div([
-        html.Span("View:", style={"marginRight": "10px", "fontWeight": "600", "color": "#d1d1d1"}),
-        html.Span("Phase-folded", style={"marginRight": "10px", "color": "#d1d1d1"}),
-        daq.BooleanSwitch(id='view-toggle', on=False, color="#4c78a8"),
-        html.Span("Unfolded", style={"marginLeft": "10px", "color": "#d1d1d1"}),
+        html.Div([
+            html.Span("View:", style={"marginRight": "10px", "fontWeight": "600", "color": "#d1d1d1"}),
+            html.Span("Phase-folded", style={"marginRight": "10px", "color": "#d1d1d1"}),
+            daq.BooleanSwitch(id='view-toggle', on=False, color="#4c78a8"),
+            html.Span("Unfolded", style={"marginLeft": "10px", "color": "#d1d1d1"}),
+        ], style={"display": "inline-flex", "alignItems": "center", "gap": "8px"}),
+        html.Div(id='view-mode-help', style={"marginTop": "6px", "color": "#d1d1d1"})
     ], style={
         "textAlign": "center", "marginTop": "10px", "padding": "8px 12px",
         "borderRadius": "10px", "backgroundColor": "#121219", "display": "inline-block"
@@ -312,7 +315,8 @@ app.layout = html.Div([
      Output('click-data', 'children'),
      Output('obs-text', 'children'),
      Output('heatmap_white', 'figure'),
-     Output('heatmap_est', 'figure')],
+     Output('heatmap_est', 'figure'),
+     Output('view-mode-help', 'children')],
     [Input('heatmap_white', 'clickData'),
      Input('heatmap_est', 'clickData'),
      Input('view-toggle', 'on')]
@@ -340,6 +344,7 @@ def update_lightcurves(cd_white, cd_est, view_toggle_on):
     P_e = float(period_grid[ie])
     D_e = float(dur_grid[je])
 
+    view_label = 'Unfolded' if bool(view_toggle_on) else 'Phase-folded'
     if bool(view_toggle_on):
         # compute masks for highlighting
         _, m_w = centered_phase_fold(cadence, P_w, D_w, alpha)
@@ -352,7 +357,8 @@ def update_lightcurves(cd_white, cd_est, view_toggle_on):
 
     click_text = html.I(
         f"White: period={period_days[iw]:.2f} d, dur={dur_hours[jw]:.2f} h | "
-        f"Adaptive: period={period_days[ie]:.2f} d, dur={dur_hours[je]:.2f} h",
+        f"Adaptive: period={period_days[ie]:.2f} d, dur={dur_hours[je]:.2f} h | "
+        f"View: {view_label}",
         style={"color": "#d1d1d1", "fontFamily": "Verdana, sans-serif"}
     )
     # Observation details
@@ -383,7 +389,9 @@ def update_lightcurves(cd_white, cd_est, view_toggle_on):
     hw = _add_cross(hw, iw, jw)
     he = _add_cross(he, ie, je)
 
-    return fig1, fig2, click_text, obs_text, hw, he
+    help_text = f"Currently showing: {view_label} view (use the switch to toggle)."
+
+    return fig1, fig2, click_text, obs_text, hw, he, help_text
 
 # ----------------------------
 # Run app
